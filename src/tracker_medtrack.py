@@ -5,7 +5,7 @@ from loguru import logger
 import dgl
 from torchreid.utils import FeatureExtractor
 from .models import NodeFeatureEncoder, EdgeFeatureEncoder, EdgePredictor, MPN#, FeatureExtractor
-from .datasets.dataset import BaseGraphDataset
+from .datasets.dataset_medtrack import BaseGraphDataset
 from .utils.tools import *
 from .utils.tracklet import Tracklet
 
@@ -39,10 +39,10 @@ class Tracker:
         make_dir(self.cfg.OUTPUT.CKPT_DIR)
 
         if self.cfg.MODEL.MODE == 'test':
-            self.output_dir = osp.join(self.cfg.OUTPUT.INFERENCE_DIR, f'test-{self.cfg.DATASET.NAME}-{self.cfg.DATASET.SEQUENCE[0]}-{int(time.time())}')
+            self.output_dir = osp.join(self.cfg.OUTPUT.INFERENCE_DIR, f'test-{self.cfg.DATASET.NAME}-{self.cfg.DATASET.SEQUENCE_TEST[0]}-{int(time.time())}')
             self.tracklet = Tracklet(self.cfg, self.output_dir)
         else:
-            self.output_dir = osp.join(self.cfg.OUTPUT.CKPT_DIR, f'train-{self.cfg.DATASET.NAME}-{self.cfg.DATASET.SEQUENCE[0]}-{self.cfg.SOLVER.TYPE}-{int(time.time())}')
+            self.output_dir = osp.join(self.cfg.OUTPUT.CKPT_DIR, f'train-{self.cfg.DATASET.NAME}-{self.cfg.DATASET.SEQUENCE_VAL[0]}-{self.cfg.SOLVER.TYPE}-{int(time.time())}')
 
         make_dir(self.output_dir)
         logger.add(f'{self.output_dir}/log.txt')
@@ -52,10 +52,16 @@ class Tracker:
         dataset_mode = ['train', 'eval'] if self.cfg.MODEL.MODE == 'train' else ['test']
         dataset_name = self.cfg.DATASET.NAME
 
-        dataset_path = osp.join(self.cfg.DATASET.DIR, dataset_name)
-        if dataset_name == 'Medtrack':
-            dataset_path = osp.join(self.cfg.DATASET.DIR)
-        dataset = [BaseGraphDataset(self.cfg, self.cfg.DATASET.SEQUENCE, mode, self.feature_extractor, dataset_path)
+        dataset_path = osp.join(self.cfg.DATASET.DIR)
+        train_seq = self.cfg.DATASET.SEQUENCE_TRAIN
+        val_seq = self.cfg.DATASET.SEQUENCE_VAL
+        test_seq = self.cfg.DATASET.SEQUENCE_TEST
+
+        if self.cfg.MODEL.MODE == 'train':
+            dataset = [BaseGraphDataset(self.cfg, train_seq, mode, self.feature_extractor, dataset_path)
+                       for mode, seq in zip(dataset_mode, [train_seq, val_seq])]
+        else:
+            dataset = [BaseGraphDataset(self.cfg, test_seq, mode, self.feature_extractor, dataset_path)
                        for mode in dataset_mode]
         logger.info(f"Loading {dataset_name} sequences {dataset[0].seq_names}")
         logger.info(f"Total graphs for training: {len(dataset[0])} and validating: {len(dataset[1])}\n"
@@ -315,7 +321,7 @@ class Tracker:
     def _save_one_epoch(self, epoch: int, output_dir):
         cfg = self.cfg
         model_path = osp.join(output_dir,
-                              f"{cfg.DATASET.NAME}_{cfg.DATASET.SEQUENCE[0]}_{cfg.SOLVER.TYPE}_epoch{epoch}.pth")
+                              f"{cfg.DATASET.NAME}_{cfg.SOLVER.TYPE}_epoch{epoch}.pth")
         torch.save({
             "node_feature_encoder": self.node_feature_encoder.state_dict(),
             "edge_feature_encoder": self.edge_feature_encoder.state_dict(),

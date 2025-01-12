@@ -1,0 +1,41 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train Rest",
+            "type": "debugpy",
+            "request": "launch",
+            "pythonPath": "/home/sktistakis/anaconda3/envs/rest/bin/python",
+            "program": "${workspaceFolder}/main_medtrack.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config_file", "./configs/medtrack.yml",
+            ]   
+        },
+        {
+            "name": "Test Rest",
+            "type": "debugpy",
+            "request": "launch",
+            "pythonPath": "/home/sktistakis/anaconda3/envs/rest/bin/python",
+            "program": "${workspaceFolder}/main_medtrack.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config_file", "./configs/medtrack.yml",
+            ]   
+        },
+        {
+            "name": "Preprocess Dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "pythonPath": "/home/sktistakis/anaconda3/envs/rest/bin/python",
+            "program": "${workspaceFolder}/src/datasets/preprocess_medtrack.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset", "Medtrack",
+            ]   
+        },
+    ]
+}

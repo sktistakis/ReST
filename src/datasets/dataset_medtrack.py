@@ -50,9 +50,8 @@ class BaseGraphDataset(Dataset):
         
         SFI = []
         for seq_id, name in enumerate(self.seq_names):
-            output_path = osp.join(self.dataset_dir, name, 'output', f'{self.cfg.MODEL.DETECTION}_{self.mode}.json')
-            if self.cfg.DATASET.NAME == 'Medtrack':
-                output_path = osp.join(self.dataset_dir, 'output', name, f'{self.cfg.MODEL.DETECTION}_{self.mode}.json')
+
+            output_path = osp.join(self.dataset_dir,"REST", 'output', name, f'gt.json')
             with open(output_path, 'r') as fp:
                 frames = json.load(fp)
             frames_id = list(map(int, frames.keys()))
@@ -61,8 +60,15 @@ class BaseGraphDataset(Dataset):
             SFI.append(torch.hstack([s_idx, f_idx]))
             self._S.append(frames)
             self._H.append(torch.tensor(meta_info[name]['homography']))
-            self._P.append([f'{self.dataset_dir}/{name}/output/frames/{{}}_{i}.jpg'
-                            for i in range(meta_info[name]['cam_nbr'])])
+            
+            cams_path = osp.join(self.dataset_dir, name, 'Image_subsets')
+            img_paths = []
+            for cam_id in range(meta_info[name]['cam_nbr']):
+                path = osp.join(cams_path, f'C{cam_id}', f'{{}}.png')
+                img_paths.append(path)
+            self._P.append(img_paths)
+            
+            
         self._SFI = torch.vstack(SFI)
 
     def load_chunks(self):
@@ -92,7 +98,7 @@ class BaseGraphDataset(Dataset):
                 x, y, w, h = frames[n, :4]
 
                 # projection for Wildtrack
-                if self.cfg.DATASET.NAME in ['Wildtrack']:
+                if self.cfg.DATASET.NAME in ['Medtrack']:
                     proj = torch.matmul(torch.linalg.inv(self._H[sid][cid]),
                                         torch.t(torch.tensor([x + w / 2, y + h, 1], dtype=torch.float32)))
                 # projection for other datasets

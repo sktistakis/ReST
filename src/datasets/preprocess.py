@@ -42,15 +42,14 @@ class BasePreprocess:
         random.seed(random_seed)
 
     def process(self):
-        if not os.path.exists(self.output_path):
-            os.mkdir(self.output_path)
+        os.makedirs(self.output_path, exist_ok=True)
         if not os.path.exists(self.frames_output_path):
             os.mkdir(self.frames_output_path)
 
         self.load_annotations()
         self.filter_frames()
         # self.load_videos()
-        if DATASET_NAME == 'Wildtrack':
+        if DATASET_NAME == 'Medtrack':
             self.load_frames()
         self.train_test_split()
         self.load_MOTgtfile()
@@ -155,7 +154,8 @@ class BasePreprocess:
         for f in tqdm.tqdm(test_frames_id):
             for det in self.frames[f]:
                 cID = det[5]
-                frame_style = {'Wildtrack': f'0000{f*5:04d}', 'PETS09': f'{f:03d}', 'CAMPUS': f'{f:04d}', 'CityFlow': f'{f}'}
+                frame_style = {'Wildtrack': f'0000{f*5:04d}', 'PETS09': f'{f:03d}', 'CAMPUS': f'{f:04d}', 'CityFlow': f'{f}',
+                               'Medtrack': f'{f}'}
                 frame = frame_style[DATASET_NAME]
                 gts[cID] = gts[cID].append({
                                             'frame': frame,
@@ -207,7 +207,90 @@ class WildtrackPreprocess(BasePreprocess):
                 img = cv2.imread(os.path.join(path, f'0000{frame_id*5:04d}.png'))
                 cv2.imwrite(os.path.join(self.frames_output_path,
                                             f'{frame_id}_{cam_id}.{self.image_format}'), img)
+                
+class MedtrackPreprocess(BasePreprocess):
+    def load_annotations(self):
+        """
+        Parse annotation files from cameras to obtain frames(self).
+        """
+        with open(os.path.join(self.base_dir, 'metainfo.json'), 'r') as f:
+            meta_info = json.load(f)
+        
+            annot_pattern = meta_info[self.dataset_name]["annot_fn_pattern"]
+            valid_frames = meta_info[self.dataset_name]["valid_frames_range"]
 
+            for frame_id in range(valid_frames[0], valid_frames[1]):
+                annot_file = os.path.join(
+                    self.base_dir,
+                    meta_info[self.dataset_name]["name"],
+                    "annotations_positions",
+                    f"{frame_id}.json"
+                )
+                if not os.path.exists(annot_file):
+                    continue  # Skip missing annotation files
+
+                with open(annot_file, 'r') as f:
+                    annotations = json.load(f)
+
+                for detection in annotations["root"].values():
+                    track_id = detection['personID']
+                    for cam_id in range(len(detection['views'])):
+                        if detection['views'][str(cam_id)]['xmin'] == -1:
+                            continue
+                        x_min = max(detection['views'][str(cam_id)]['xmin'], 0) # prevent negative value
+                        y_min = max(detection['views'][str(cam_id)]['ymin'], 0) # prevent negative value
+                        width = detection['views'][str(cam_id)]['xmax'] - x_min
+                        height = detection['views'][str(cam_id)]['ymax'] - y_min
+                        self.frames.setdefault(frame_id, []).append(
+                            (x_min, y_min, width, height, track_id, cam_id)
+                        )
+
+    def load_frames(self):
+        """
+        Extract frames from videos and save as images for processing.
+        """
+        with open(os.path.join(self.base_dir, 'metainfo.json'), 'r') as f:
+            meta_info = json.load(f)
+
+        cam_count = meta_info[self.dataset_name]["cam_nbr"]
+
+        for cam_id in range(cam_count):
+            cam_path = os.path.join(
+                self.base_dir,
+                meta_info[self.dataset_name]["name"],
+                "Image_subsets",
+                f"C{cam_id}"
+            )
+            if not os.path.exists(cam_path):
+                continue
+
+            for frame_id in trange(self.valid_frames_range[-1]):
+                img = cv2.imread(os.path.join(cam_path, f"{frame_id}.png"))
+                cv2.imwrite(os.path.join(self.frames_output_path,
+                                            f'{frame_id}_{cam_id}.{self.image_format}'), img)
+
+    def train_test_split(self):
+        rec_ids = list(sorted(self.frames.keys()))
+
+        #  Depending on if self.train_ratio == 1, self.test_ratio == 0, self.eval_ratio == 0 we will put all frames 
+        # into the train or val or test set.
+        if self.test_ratio == 0 and self.eval_ratio == 0:
+            train_frames = self.select_frames(rec_ids)
+            sorted_train_frames = dict(sorted(train_frames.items()))
+            self.save_json(sorted_train_frames, 'gt_train')
+            return 
+        elif self.eval_ratio == 1:
+            eval_frames = self.select_frames(rec_ids)
+            sorted_eval_frames = dict(sorted(eval_frames.items()))
+            self.save_json(sorted_eval_frames, 'gt_eval')
+            return
+        elif self.test_ratio == 1:
+            test_frames = self.select_frames(rec_ids)
+            sorted_test_frames = dict(sorted(test_frames.items()))
+            self.save_json(sorted_test_frames, 'gt_test')
+            return
+    
+    
 class CAMPUSPreprocess(BasePreprocess):
 
     def load_annotations(self):
@@ -243,20 +326,18 @@ class CityFlowPreprocess(BasePreprocess):
 def preprocess(dataset_dir, PreProcess, output_dir=None):
     with open(os.path.join(dataset_dir, 'metainfo.json'), 'r') as fp:
         meta_info = json.load(fp)
-    for dataset_name in meta_info.keys():
-        print(dataset_name)
-        if dataset_name == 'S01':
-            continue
-        dmi = meta_info[dataset_name]
+
+    for recording_name, recording_meta in meta_info.items():
+        print(f"Processing recording: {recording_name}")
         dataset = PreProcess(
-            dataset_name,
-            dataset_dir,
-            [dmi['annot_fn_pattern'].format(cam_id) for cam_id in range(dmi['cam_nbr'])],
-            [dmi['video_fn_pattern'].format(cam_id) for cam_id in range(dmi['cam_nbr'])],
-            dmi['eval_ratio'],
-            dmi['test_ratio'],
-            dmi['valid_frames_range'],
-            output_dir=output_dir
+            dataset_name=recording_name,
+            base_dir=dataset_dir,
+            annots_name=[recording_meta['annot_fn_pattern'].format(cam_id) for cam_id in range(recording_meta['cam_nbr'])],
+            videos_name=[recording_meta['video_fn_pattern'].format(cam_id) for cam_id in range(recording_meta['cam_nbr'])],
+            eval_ratio=recording_meta['eval_ratio'],
+            test_ratio=recording_meta['test_ratio'],
+            valid_frames_range=recording_meta['valid_frames_range'],
+            output_dir=os.path.join(output_dir, recording_name) if output_dir is not None else None
         )
         dataset.process()
 
@@ -270,7 +351,7 @@ def parse_args():
 
 if __name__ == '__main__':
     DATASET_NAME = parse_args()
-    if DATASET_NAME not in ['Wildtrack', 'CAMPUS', 'PETS09', 'CityFlow']:
+    if DATASET_NAME not in ['Wildtrack', 'CAMPUS', 'PETS09', 'CityFlow', 'Medtrack']:
         print('Please enter valid dataset.')
     else:
         print(f'Pre-processing {DATASET_NAME}...')
@@ -278,6 +359,12 @@ if __name__ == '__main__':
         if DATASET_NAME == 'Wildtrack':
             preprocess(dataset_dir=f'./datasets/{DATASET_NAME}', PreProcess=WildtrackPreprocess,
                             output_dir="./datasets/Wildtrack/sequence1/output")
+        if DATASET_NAME == 'Medtrack':
+            preprocess(
+                dataset_dir=f'/media/sktistakis/T7/USZ_STUDY/USZ_Wildtrack',
+                PreProcess=MedtrackPreprocess,
+                output_dir=f"./datasets/{DATASET_NAME}/output"
+            )
         elif DATASET_NAME == 'CityFlow':
             preprocess(f'./datasets/{DATASET_NAME}', PreProcess=CityFlowPreprocess)
         else: # CAMPUS, PETS09
